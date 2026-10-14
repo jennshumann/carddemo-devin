@@ -1,9 +1,11 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import * as cdk from 'aws-cdk-lib/core';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
 
 export class CardDemoStack extends cdk.Stack {
@@ -38,6 +40,7 @@ export class CardDemoStack extends cdk.Stack {
       serverlessV2MaxCapacity: 2,
       credentials: rds.Credentials.fromGeneratedSecret('carddemo_admin'),
       defaultDatabaseName: 'carddemo',
+      enableDataApi: true,
       storageEncrypted: true,
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
@@ -60,8 +63,52 @@ export class CardDemoStack extends cdk.Stack {
     db.secret!.grantRead(batchFn);
     db.connections.allowDefaultPortFrom(batchFn);
 
+    // Shared Aurora tables, created through the RDS Data API (one statement each).
+    const schemaTables: Array<{ table: string; ddl: string }> = [
+      { table: 'account', ddl: '../../CBACT01C/schema/account.sql' },
+    ];
+    for (const { table, ddl } of schemaTables) {
+      const sql = fs.readFileSync(path.join(__dirname, ddl), 'utf8');
+      const executeDdl: cr.AwsSdkCall = {
+        service: 'rds-data',
+        action: 'ExecuteStatement',
+        parameters: {
+          resourceArn: db.clusterArn,
+          secretArn: db.secret!.secretArn,
+          database: 'carddemo',
+          sql,
+        },
+        physicalResourceId: cr.PhysicalResourceId.of(`carddemo-table-${table}`),
+      };
+      const createTable = new cr.AwsCustomResource(this, `Table-${table}`, {
+        onCreate: executeDdl,
+        onUpdate: executeDdl,
+        policy: cr.AwsCustomResourcePolicy.fromSdkCalls({ resources: [db.clusterArn] }),
+        installLatestAwsSdk: false,
+      });
+      db.grantDataApiAccess(createTable);
+      createTable.node.addDependency(db);
+    }
+
+    // CBACT01C: account extract. Reads in/CBACT01C/, writes out/CBACT01C/.
+    const cbact01cFn = new lambda.Function(this, 'Cbact01cFn', {
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'handler.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../CBACT01C/src'), {
+        exclude: ['__pycache__'],
+      }),
+      timeout: cdk.Duration.minutes(5),
+      memorySize: 512,
+      vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      environment: { DATA_BUCKET: dataBucket.bucketName },
+    });
+    dataBucket.grantRead(cbact01cFn, 'in/CBACT01C/*');
+    dataBucket.grantPut(cbact01cFn, 'out/CBACT01C/*');
+
     new cdk.CfnOutput(this, 'DataBucketName', { value: dataBucket.bucketName });
     new cdk.CfnOutput(this, 'DbSecretArn', { value: db.secret!.secretArn });
     new cdk.CfnOutput(this, 'BatchSkeletonFnName', { value: batchFn.functionName });
+    new cdk.CfnOutput(this, 'Cbact01cFnName', { value: cbact01cFn.functionName });
   }
 }
