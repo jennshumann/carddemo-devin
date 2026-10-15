@@ -4,3 +4,4 @@ COBOL batch programs from `/app` re-implemented as AWS Lambda functions (Python 
 
 - `infra/` — AWS CDK app (TypeScript). `npm install && npx cdk synth`, `npm test`.
 - `lambdas/` — one directory per Lambda function.
+- `<PROGRAM>/` — one directory per migrated batch program (spec, GnuCOBOL harness, golden files, Lambda source, parity tests): `CBACT01C/` (READACCT), `CBACT04C/` (INTCALC).

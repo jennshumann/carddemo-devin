@@ -5,6 +5,8 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
+import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as cr from 'aws-cdk-lib/custom-resources';
 import { Construct } from 'constructs';
 
@@ -106,9 +108,47 @@ export class CardDemoStack extends cdk.Stack {
     dataBucket.grantRead(cbact01cFn, 'in/CBACT01C/*');
     dataBucket.grantPut(cbact01cFn, 'out/CBACT01C/*');
 
+    // CBACT04C (JCL INTCALC): interest calculator. Reads in/CBACT04C/, writes out/CBACT04C/.
+    const cbact04cFn = new lambda.Function(this, 'Cbact04cFn', {
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'handler.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../CBACT04C/src'), {
+        exclude: ['__pycache__'],
+      }),
+      timeout: cdk.Duration.minutes(5),
+      memorySize: 512,
+      vpc,
+      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
+      environment: { DATA_BUCKET: dataBucket.bucketName },
+    });
+    dataBucket.grantRead(cbact04cFn, 'in/CBACT04C/*');
+    dataBucket.grantPut(cbact04cFn, 'out/CBACT04C/*');
+
+    // Mirrors INTCALC.jcl: one step, STEP15 EXEC PGM=CBACT04C,PARM='2022071800'.
+    const step15 = new tasks.LambdaInvoke(this, 'STEP15-CBACT04C', {
+      lambdaFunction: cbact04cFn,
+      // Execution input is passed through, e.g. {"parm_date": "2022071800"}; the
+      // Lambda defaults parm_date to the JCL PARM when it is absent.
+      payload: sfn.TaskInput.fromJsonPathAt('$'),
+      payloadResponseOnly: true,
+      retryOnServiceExceptions: true,
+    });
+    step15.addCatch(
+      new sfn.Fail(this, 'INTCALC-ABEND', {
+        error: 'CBACT04C.Abend',
+        cause: 'CBACT04C abended; no outputs were written. See the Lambda logs (SYSOUT).',
+      }),
+    );
+    const intcalcStateMachine = new sfn.StateMachine(this, 'IntcalcStateMachine', {
+      definitionBody: sfn.DefinitionBody.fromChainable(step15.next(new sfn.Succeed(this, 'INTCALC-OK'))),
+      timeout: cdk.Duration.minutes(15),
+    });
+
     new cdk.CfnOutput(this, 'DataBucketName', { value: dataBucket.bucketName });
     new cdk.CfnOutput(this, 'DbSecretArn', { value: db.secret!.secretArn });
     new cdk.CfnOutput(this, 'BatchSkeletonFnName', { value: batchFn.functionName });
     new cdk.CfnOutput(this, 'Cbact01cFnName', { value: cbact01cFn.functionName });
+    new cdk.CfnOutput(this, 'Cbact04cFnName', { value: cbact04cFn.functionName });
+    new cdk.CfnOutput(this, 'IntcalcStateMachineArn', { value: intcalcStateMachine.stateMachineArn });
   }
 }
