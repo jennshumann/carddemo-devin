@@ -3,6 +3,7 @@
 TRANSACT is compared byte for byte with only TRAN-ORIG-TS and TRAN-PROC-TS
 masked. ACCTFILE and SYSOUT are compared exactly.
 """
+import json
 import re
 import shutil
 import subprocess
@@ -46,6 +47,11 @@ def mask_timestamps(data: bytes) -> bytes:
     return bytes(out)
 
 
+def read_output(s3, name):
+    manifest = json.loads(s3.objects[(BUCKET, "out/CBACT04C/LATEST.json")])
+    return s3.objects[(BUCKET, manifest["outputs"][name])]
+
+
 def run_lambda(handler_module, case):
     src = INPUT_DIRS[case]
     s3 = FakeS3({
@@ -72,7 +78,7 @@ def handler_module(monkeypatch):
 def test_transact_matches_golden_except_timestamps(handler_module, case):
     s3, abend = run_lambda(handler_module, case)
     assert abend is None
-    actual = s3.objects[(BUCKET, "out/CBACT04C/TRANSACT.dat")]
+    actual = read_output(s3, "TRANSACT.dat")
     golden = (GOLDEN / case / "TRANSACT.dat").read_bytes()
     assert len(actual) == len(golden)
     assert mask_timestamps(actual) == mask_timestamps(golden)
@@ -81,7 +87,7 @@ def test_transact_matches_golden_except_timestamps(handler_module, case):
 @pytest.mark.parametrize("case", SUCCESS_CASES)
 def test_acctfile_matches_golden(handler_module, case):
     s3, _ = run_lambda(handler_module, case)
-    actual = s3.objects[(BUCKET, "out/CBACT04C/ACCTFILE.dat")]
+    actual = read_output(s3, "ACCTFILE.dat")
     assert actual == (GOLDEN / case / "ACCTFILE.dat").read_bytes()
 
 
@@ -96,6 +102,7 @@ def test_sysout_matches_golden(handler_module, case, capsys):
 def test_abend_matches_golden(handler_module, case, capsys):
     s3, abend = run_lambda(handler_module, case)
     assert abend is not None and abend.code == 999
+    assert s3.puts == []
     assert capsys.readouterr().out == (GOLDEN / case / "SYSOUT.txt").read_text()
     # CEE3ABD stand-in sets RETURN-CODE 999; the shell sees it modulo 256.
     assert int((GOLDEN / case / "RC.txt").read_text()) == 999 % 256

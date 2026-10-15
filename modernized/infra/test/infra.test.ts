@@ -62,6 +62,14 @@ test('CBACT04C Lambda reads in/CBACT04C/ and writes out/CBACT04C/', () => {
   expect(policies).toContain('/out/CBACT04C/*');
 });
 
+test('CBACT04C Lambda can read its own out/CBACT04C/ (account feedback)', () => {
+  const statements = Object.values(template.findResources('AWS::IAM::Policy')).flatMap(
+    (p: any) => p.Properties.PolicyDocument.Statement,
+  );
+  const reads = statements.filter((s: any) => [].concat(s.Action).includes('s3:GetObject*' as never));
+  expect(reads.some((s: any) => JSON.stringify(s.Resource).includes('/out/CBACT04C/*'))).toBe(true);
+});
+
 test('INTCALC state machine mirrors STEP15 and fails on abend', () => {
   template.resourceCountIs('AWS::StepFunctions::StateMachine', 1);
   const machines = template.findResources('AWS::StepFunctions::StateMachine');

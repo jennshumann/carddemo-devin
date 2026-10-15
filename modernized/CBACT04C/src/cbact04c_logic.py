@@ -102,19 +102,20 @@ def db2_timestamp(now: datetime) -> bytes:
     return (now.strftime("%Y-%m-%d-%H.%M.%S") + f".{now.microsecond // 10000:02d}0000").encode("ascii")
 
 
-def parse_records(data: bytes, length: int) -> list[bytes]:
-    """Split an extract into fixed-length records.
+def parse_records(data: bytes, length: int, fmt: str = "line") -> list[bytes]:
+    """Split a dataset into fixed-length records.
 
-    Accepts line-sequential text (LF or CRLF; short lines are padded with
-    spaces, as a GnuCOBOL LINE SEQUENTIAL read does) or, when there is no
-    LF at all, a fixed-length RECFM=F file such as this program's output.
+    fmt="line": line-sequential text (LF or CRLF, last LF optional). Short lines
+    are space-padded, as a GnuCOBOL LINE SEQUENTIAL read does.
+    fmt="fixed": RECFM=F, e.g. this program's output. Split strictly by size,
+    so LF bytes inside a record are just data.
     """
-    if not data:
-        return []
-    if b"\n" not in data:
+    if fmt == "fixed":
         if len(data) % length:
             raise ValueError(f"fixed-length file size {len(data)} is not a multiple of {length}")
         return [data[i:i + length] for i in range(0, len(data), length)]
+    if fmt != "line":
+        raise ValueError(f"unknown record format {fmt!r} (expected 'line' or 'fixed')")
     records = []
     for line in data.split(b"\n"):
         line = line.removesuffix(b"\r")
@@ -135,11 +136,11 @@ def _index(records: list[bytes], key: slice, name: str) -> dict[bytes, bytes]:
 
 
 def normalize_parm(parm: str) -> bytes:
-    """EXEC PARM text as PARM-DATE PIC X(10)."""
-    raw = parm.encode("ascii")
-    if not 1 <= len(raw) <= 10:
-        raise ValueError("PARM must be 1 to 10 characters (PARM-DATE PIC X(10))")
-    return raw.ljust(10)
+    """EXEC PARM text as PARM-DATE PIC X(10): first 10 bytes, space-padded.
+
+    CBACT04C never checks the PARM length, so empty or longer values are accepted.
+    """
+    return parm.encode("ascii")[:10].ljust(10)
 
 
 @dataclass

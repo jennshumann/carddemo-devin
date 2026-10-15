@@ -108,7 +108,8 @@ export class CardDemoStack extends cdk.Stack {
     dataBucket.grantRead(cbact01cFn, 'in/CBACT01C/*');
     dataBucket.grantPut(cbact01cFn, 'out/CBACT01C/*');
 
-    // CBACT04C (JCL INTCALC): interest calculator. Reads in/CBACT04C/, writes out/CBACT04C/.
+    // CBACT04C (JCL INTCALC): interest calculator. Reads in/CBACT04C/ (and its own
+    // out/CBACT04C/ so a previous run's ACCTFILE.dat can be fed back), writes out/CBACT04C/.
     const cbact04cFn = new lambda.Function(this, 'Cbact04cFn', {
       runtime: lambda.Runtime.PYTHON_3_12,
       handler: 'handler.handler',
@@ -122,6 +123,7 @@ export class CardDemoStack extends cdk.Stack {
       environment: { DATA_BUCKET: dataBucket.bucketName },
     });
     dataBucket.grantRead(cbact04cFn, 'in/CBACT04C/*');
+    dataBucket.grantRead(cbact04cFn, 'out/CBACT04C/*');
     dataBucket.grantPut(cbact04cFn, 'out/CBACT04C/*');
 
     // Mirrors INTCALC.jcl: one step, STEP15 EXEC PGM=CBACT04C,PARM='2022071800'.
@@ -136,7 +138,7 @@ export class CardDemoStack extends cdk.Stack {
     step15.addCatch(
       new sfn.Fail(this, 'INTCALC-ABEND', {
         error: 'CBACT04C.Abend',
-        cause: 'CBACT04C abended; no outputs were written. See the Lambda logs (SYSOUT).',
+        cause: 'CBACT04C failed; out/CBACT04C/LATEST.json was not updated. See the Lambda logs (SYSOUT).',
       }),
     );
     const intcalcStateMachine = new sfn.StateMachine(this, 'IntcalcStateMachine', {

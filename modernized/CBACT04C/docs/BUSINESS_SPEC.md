@@ -8,7 +8,7 @@ Monthly interest posting. For each transaction-category balance, the program loo
 
 ## JCL (INTCALC, one step)
 
-`STEP15 EXEC PGM=CBACT04C,PARM='2022071800'`. The PARM reaches the program as `EXTERNAL-PARMS` (halfword `PARM-LENGTH` followed by `PARM-DATE PIC X(10)`). Only `PARM-DATE` is used, as the first 10 characters of each generated `TRAN-ID`. It is not checked as a date.
+`STEP15 EXEC PGM=CBACT04C,PARM='2022071800'`. The PARM reaches the program as `EXTERNAL-PARMS` (halfword `PARM-LENGTH` followed by `PARM-DATE PIC X(10)`). Only `PARM-DATE` is used, as the first 10 characters of each generated `TRAN-ID`. It is not checked as a date, and its length is not checked either: the Lambda takes the first 10 bytes and space-pads a shorter (or empty) value.
 
 ## Files
 

@@ -69,19 +69,24 @@ def test_db2_timestamp():
 
 def test_parse_records_line_sequential_crlf_and_padding():
     assert parse_records(b"AB\r\nC\n", 4) == [b"AB  ", b"C   "]
+    assert parse_records(b"AB", 4, "line") == [b"AB  "]  # no trailing LF
 
 
 def test_parse_records_fixed_length():
-    assert parse_records(b"AAAABBBB", 4) == [b"AAAA", b"BBBB"]
+    assert parse_records(b"AAAABBBB", 4, "fixed") == [b"AAAA", b"BBBB"]
+    assert parse_records(b"A\nAABBBB", 4, "fixed") == [b"A\nAA", b"BBBB"]  # LF is data
+    assert parse_records(b"", 4, "fixed") == []
     with pytest.raises(ValueError):
-        parse_records(b"AAAAB", 4)
+        parse_records(b"AAAAB", 4, "fixed")
+    with pytest.raises(ValueError):
+        parse_records(b"AAAA", 4, "vb")
 
 
-def test_parm_validation():
+def test_parm_is_first_ten_bytes_space_padded():
     assert normalize_parm("2022071800") == b"2022071800"
     assert normalize_parm("20220718") == b"20220718  "
-    with pytest.raises(ValueError):
-        normalize_parm("20220718001")
+    assert normalize_parm("2022071800EXTRA") == b"2022071800"
+    assert normalize_parm("") == b" " * 10
 
 
 def test_duplicate_primary_key_rejected():

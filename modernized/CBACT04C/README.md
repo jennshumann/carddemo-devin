@@ -9,7 +9,7 @@ flowchart LR
     SFN["IntcalcStateMachine<br/>STEP15-CBACT04C<br/>(Catch → INTCALC-ABEND)"] -->|"{parm_date}"| FN
     subgraph S3["Shared DataBucket"]
         IN["in/CBACT04C/<br/>tcatbal.txt · acctdata.txt<br/>cardxref.txt · discgrp.txt"]
-        OUT["out/CBACT04C/<br/>TRANSACT.dat (F 350)<br/>ACCTFILE.dat (F 300)"]
+        OUT["out/CBACT04C/runs/&lt;run_id&gt;/<br/>TRANSACT.dat (F 350)<br/>ACCTFILE.dat (F 300)<br/>+ out/CBACT04C/LATEST.json"]
     end
     subgraph VPC["CardDemo VPC (isolated subnets)"]
         FN["Cbact04cFn · Python 3.12<br/>handler.py → cbact04c_logic.py"]
@@ -22,9 +22,10 @@ flowchart LR
 | z/OS | AWS |
 |---|---|
 | `STEP15 EXEC PGM=CBACT04C,PARM='2022071800'` | State machine task `STEP15-CBACT04C` → `Cbact04cFn`, event `{"parm_date": "2022071800"}` (that value is also the default) |
-| `TCATBALF` / `ACCTFILE` / `XREFFILE`+`XREFFIL1` / `DISCGRP` VSAM KSDS | `in/CBACT04C/{tcatbal,acctdata,cardxref,discgrp}.txt`, loaded into in-memory indexes. Key order is restored by sorting; duplicate primary keys are rejected as a KSDS load would. Each key can be overridden in the event (`tcatbal_key`, `acctdata_key`, `cardxref_key`, `discgrp_key`). |
-| `TRANSACT` → `SYSTRAN(+1)` GDG | `out/CBACT04C/TRANSACT.dat`. The bucket is versioned, so each run keeps prior generations. |
-| `ACCTFILE` updated in place (REWRITE) | `out/CBACT04C/ACCTFILE.dat`: the full account file after the run, in key order, 300-byte records. It can be fed back in as `acctdata_key`. |
+| `TCATBALF` / `ACCTFILE` / `XREFFILE`+`XREFFIL1` / `DISCGRP` VSAM KSDS | `in/CBACT04C/{tcatbal,acctdata,cardxref,discgrp}.txt`, loaded into in-memory indexes. Key order is restored by sorting; duplicate primary keys are rejected as a KSDS load would. Each key can be overridden in the event (`tcatbal_key`, `acctdata_key`, `cardxref_key`, `discgrp_key`). Overrides must stay under `in/CBACT04C/` or `out/CBACT04C/`, the only prefixes the Lambda can read. Keys ending in `.dat` are read as RECFM=F, split strictly every N bytes; anything else is read as line-sequential. `<name>_format: "fixed"|"line"` (e.g. `acctdata_format`) sets the format explicitly. |
+| `TRANSACT` → `SYSTRAN(+1)` GDG | `out/CBACT04C/runs/<run_id>/TRANSACT.dat`. Each run is its own generation. `run_id` comes from the event or defaults to the Lambda request ID. |
+| `ACCTFILE` updated in place (REWRITE) | `out/CBACT04C/runs/<run_id>/ACCTFILE.dat`: the full account file after the run, in key order, 300-byte records. It can be fed back in as `acctdata_key`. |
+| Catalog: which generation is current | `out/CBACT04C/LATEST.json` holds `run_id`, `parm_date`, counts, and the `outputs` keys. It is written only after both data files upload, so it is the single commit point. Consumers should resolve outputs through it. A failed or partial run never changes it. |
 | SYSOUT | CloudWatch Logs (same lines as the COBOL SYSOUT) |
 | Abend `CEE3ABD` 999 | `CobolAbend` exception → Lambda error → `INTCALC-ABEND` Fail state |
 
